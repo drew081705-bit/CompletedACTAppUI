@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dispatch — Achievement Center of Texas</title>
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='images/logo.png') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__brand">
+    <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Achievement Center of Texas" class="topbar__logo">
+    <div>
+      <h1>Dispatch</h1>
+      <p>Achievement Center of Texas &middot; Van assignment planner</p>
+    </div>
+  </div>
+  <div class="topbar__right">
+    <span class="sync-indicator" id="syncIndicator">
+      <span class="sync-dot"></span>
+      <span id="syncLabel">Live</span>
+    </span>
+    <button id="resetBtn" class="btn btn--ghost">Clear all assignments</button>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main class="layout">
+
+  <!-- ROSTER -->
+  <section class="roster">
+    <div class="panel">
+      <div class="panel__header">
+        <h2>Students</h2>
+        <span class="panel__count" id="studentCount">0</span>
+      </div>
+      <ul id="roster-students-list" class="chip-list" data-context="roster" data-type="student"></ul>
+      <form id="addStudentForm" class="inline-form">
+        <input type="text" id="studentNameInput" placeholder="Add student name" autocomplete="off">
+        <label class="check">
+          <input type="checkbox" id="studentPresentInput" checked> Present
+        </label>
+        <button type="submit" class="btn btn--small">Add</button>
+      </form>
+    </div>
+
+    <div class="panel">
+      <div class="panel__header">
+        <h2>Teachers</h2>
+        <span class="panel__count" id="teacherCount">0</span>
+      </div>
+      <ul id="roster-teachers-list" class="chip-list" data-context="roster" data-type="teacher"></ul>
+      <form id="addTeacherForm" class="inline-form">
+        <input type="text" id="teacherNameInput" placeholder="Add teacher name" autocomplete="off">
+        <button type="submit" class="btn btn--small">Add</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- VANS -->
+  <section class="fleet">
+    <div class="fleet__header">
+      <h2>Vans</h2>
+      <p>Drag a name onto a van to assign it. Drag it back to the roster to remove it.</p>
+    </div>
+    <div id="vanGrid" class="van-grid"></div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span>&copy; Achievement Center of Texas</span>
+  <a href="https://www.facebook.com/Achieve1977/" target="_blank" rel="noopener">Facebook</a>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
