@@ -3,6 +3,7 @@ from flask import Flask, render_template, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
+app.json.sort_keys = False  # preserve our van ordering — Flask sorts JSON keys by default
 
 # ──────────────────────────────────────────────────────────────
 # DATABASE SETUP
@@ -25,6 +26,7 @@ class Van(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)
     capacity = db.Column(db.Integer, nullable=False)
+    order_index = db.Column(db.Integer, nullable=False, default=0)
 
     students = db.relationship("Student", backref="van", lazy=True)
     teachers = db.relationship("Teacher", backref="van", lazy=True)
@@ -57,8 +59,6 @@ def can_assign_student(van):
         return False, "Adding a student would exceed van capacity."
     if len(van.teachers) == 0:
         return False, "Each van must have at least one teacher before assigning students."
-    if len(van.students) + 1 > 2 * len(van.teachers):
-        return False, "Cannot assign more than 2 students per 1 teacher."
     return True, ""
 
 
@@ -182,6 +182,47 @@ def reset_assignments():
     db.session.commit()
 
 
+def add_van(name, capacity):
+    name = name.strip()
+    if not name:
+        return "Van name cannot be blank."
+    if Van.query.filter_by(name=name).first() is not None:
+        return f"{name} already exists."
+    try:
+        capacity = int(capacity)
+    except (TypeError, ValueError):
+        return "Capacity must be a number."
+    if capacity < 1:
+        return "Capacity must be at least 1."
+    max_order = db.session.query(db.func.max(Van.order_index)).scalar()
+    next_order = (max_order + 1) if max_order is not None else 0
+    db.session.add(Van(name=name, capacity=capacity, order_index=next_order))
+    db.session.commit()
+    return f"Van {name} added."
+
+
+def delete_van(van_name):
+    van = Van.query.filter_by(name=van_name).first()
+    if van is None:
+        return f"{van_name} does not exist."
+    for student in van.students:
+        student.van_id = None
+    for teacher in van.teachers:
+        teacher.van_id = None
+    db.session.delete(van)
+    db.session.commit()
+    return f"Van {van_name} deleted. Anyone assigned to it is now unassigned."
+
+
+def reorder_vans(ordered_names):
+    vans_by_name = {v.name: v for v in Van.query.all()}
+    for index, name in enumerate(ordered_names):
+        van = vans_by_name.get(name)
+        if van is not None:
+            van.order_index = index
+    db.session.commit()
+
+
 # ──────────────────────────────────────────────────────────────
 # STATE SERIALIZATION — turns the database into JSON for the browser
 # ──────────────────────────────────────────────────────────────
@@ -207,7 +248,7 @@ def get_state():
                 "teachers": [t.name for t in v.teachers],
                 "occupants": total_occupants(v),
             }
-            for v in Van.query.all()
+            for v in Van.query.order_by(Van.order_index).all()
         },
     }
 
@@ -223,12 +264,11 @@ def seed_if_empty():
         return  # database already has real data — never overwrite it
 
     db.session.add_all([
-        Van(name="Mobility Van", capacity=7),
-        Van(name="Toyota Mini", capacity=6),
-        Van(name="Dodge Mini", capacity=6),
-        Van(name="Red Van", capacity=15),
-        Van(name="White Pass Van", capacity=15),
-        Van(name="Black Van", capacity=12),
+        Van(name="Mobility Van", capacity=7, order_index=0),
+        Van(name="Toyota Mini", capacity=6, order_index=1),
+        Van(name="Red Van", capacity=15, order_index=2),
+        Van(name="White Pass Van", capacity=15, order_index=3),
+        Van(name="Black Van", capacity=12, order_index=4),
     ])
     db.session.add_all([
         Student(name="Jeff", present=True, class_name="Yellow"),
@@ -323,6 +363,27 @@ def api_delete_teacher():
     data = request.get_json()
     message = delete_teacher(data["name"])
     return jsonify({"message": message, "state": get_state()})
+
+
+@app.route("/api/add_van", methods=["POST"])
+def api_add_van():
+    data = request.get_json()
+    message = add_van(data["name"], data["capacity"])
+    return jsonify({"message": message, "state": get_state()})
+
+
+@app.route("/api/delete_van", methods=["POST"])
+def api_delete_van():
+    data = request.get_json()
+    message = delete_van(data["name"])
+    return jsonify({"message": message, "state": get_state()})
+
+
+@app.route("/api/reorder_vans", methods=["POST"])
+def api_reorder_vans():
+    data = request.get_json()
+    reorder_vans(data["order"])
+    return jsonify({"message": "Van order updated.", "state": get_state()})
 
 
 @app.route("/api/reset", methods=["POST"])
