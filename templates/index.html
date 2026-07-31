@@ -66,13 +66,24 @@
   <!-- VANS -->
   <section class="fleet">
     <div class="fleet__header">
-      <h2>Vans</h2>
-      <p>Drag a name onto a van to assign it. Drag it back to the roster to remove it.</p>
+      <div>
+        <h2>Vans</h2>
+        <p>Drag a name onto a van to assign it, or back to the roster to remove it. Drag a van's ⠿ handle to reorder it.</p>
+      </div>
+      <button id="printBtn" class="btn btn--ghost">Print / Save Assignments</button>
     </div>
+    <form id="addVanForm" class="inline-form inline-form--van">
+      <input type="text" id="vanNameInput" placeholder="New van name" autocomplete="off">
+      <input type="number" id="vanCapacityInput" placeholder="Capacity" min="1" autocomplete="off">
+      <button type="submit" class="btn btn--small">Add Van</button>
+    </form>
     <div id="vanGrid" class="van-grid"></div>
   </section>
 
 </main>
+
+<!-- Built only at print time — see script.js buildPrintReport() -->
+<div id="printReport" class="print-report"></div>
 
 <footer class="footer">
   <span>&copy; Achievement Center of Texas</span>

@@ -33,7 +33,8 @@ function looksLikeError(msg) {
     m.includes('not ') ||
     m.includes('does not') ||
     m.includes('already') ||
-    m.includes('blank')
+    m.includes('blank') ||
+    m.includes('must')
   );
 }
 
@@ -149,19 +150,50 @@ function render(newState) {
   Object.entries(state.vans).forEach(([vanName, van], idx) => {
     const card = document.createElement('div');
     card.className = 'van-card';
+    card.dataset.van = vanName;
 
     const header = document.createElement('div');
     header.className = 'van-card__header';
+
+    const title = document.createElement('div');
+    title.className = 'van-card__title';
+    const handle = document.createElement('span');
+    handle.className = 'van-card__handle';
+    handle.title = 'Drag to reorder';
+    handle.textContent = '\u283F';
+    title.appendChild(handle);
     const nameEl = document.createElement('span');
     nameEl.className = 'van-card__name';
     nameEl.textContent = vanName;
-    header.appendChild(nameEl);
+    title.appendChild(nameEl);
+    header.appendChild(title);
+
+    const headerRight = document.createElement('div');
+    headerRight.className = 'van-card__header-right';
     const occ = document.createElement('span');
     occ.className =
       'van-card__occupancy' +
       (van.occupants >= van.capacity ? ' van-card__occupancy--full' : '');
     occ.textContent = `${van.occupants}/${van.capacity}`;
-    header.appendChild(occ);
+    headerRight.appendChild(occ);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'van-card__delete';
+    deleteBtn.type = 'button';
+    deleteBtn.title = 'Delete van';
+    deleteBtn.textContent = '\u00d7';
+    deleteBtn.addEventListener('click', async () => {
+      const hasOccupants = van.occupants > 0;
+      const confirmMsg = hasOccupants
+        ? `Delete ${vanName}? ${van.occupants} assigned to it will be unassigned.`
+        : `Delete ${vanName}?`;
+      if (!confirm(confirmMsg)) return;
+      const res = await api('delete_van', { name: vanName });
+      showMessage(res.message, looksLikeError(res.message));
+      render(res.state);
+    });
+    headerRight.appendChild(deleteBtn);
+    header.appendChild(headerRight);
+
     card.appendChild(header);
 
     const strip = document.createElement('div');
@@ -251,6 +283,28 @@ function initSortables() {
     });
     sortables.push(s);
   });
+
+  // Reordering the vans themselves is a separate Sortable instance, scoped
+  // to only start dragging from the ⠿ handle — otherwise it would conflict
+  // with dragging student/teacher chips around inside each card.
+  const grid = document.getElementById('vanGrid');
+  const gridSortable = new Sortable(grid, {
+    handle: '.van-card__handle',
+    animation: 150,
+    forceFallback: true,
+    fallbackTolerance: 3,
+    onStart: () => {
+      isDragging = true;
+    },
+    onEnd: async (evt) => {
+      isDragging = false;
+      if (evt.oldIndex === evt.newIndex) return;
+      const order = Array.from(grid.children).map((card) => card.dataset.van);
+      const res = await api('reorder_vans', { order });
+      render(res.state);
+    },
+  });
+  sortables.push(gridSortable);
 }
 
 async function handleMove(evt, personType) {
@@ -296,6 +350,22 @@ document.getElementById('addTeacherForm').addEventListener('submit', async (e) =
   const res = await api('add_teacher', { name });
   showMessage(res.message, looksLikeError(res.message));
   if (!looksLikeError(res.message)) input.value = '';
+  render(res.state);
+});
+
+document.getElementById('addVanForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const nameInput = document.getElementById('vanNameInput');
+  const capacityInput = document.getElementById('vanCapacityInput');
+  const name = nameInput.value.trim();
+  const capacity = capacityInput.value;
+  if (!name || !capacity) return;
+  const res = await api('add_van', { name, capacity });
+  showMessage(res.message, looksLikeError(res.message));
+  if (!looksLikeError(res.message)) {
+    nameInput.value = '';
+    capacityInput.value = '';
+  }
   render(res.state);
 });
 
@@ -368,6 +438,71 @@ document.addEventListener('visibilitychange', () => {
     pollState();
     startPolling();
   }
+});
+
+// ── Print / export ──
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function buildPrintReport() {
+  const el = document.getElementById('printReport');
+  const generated = new Date().toLocaleString();
+
+  let html = `<h1>Dispatch — Van Assignments</h1>`;
+  html += `<p class="print-meta">Generated ${generated}</p>`;
+
+  Object.entries(state.vans).forEach(([vanName, van]) => {
+    html += `<div class="print-van">`;
+    html += `<h2>${escapeHtml(vanName)} <span class="print-occ">(${van.occupants}/${van.capacity})</span></h2>`;
+
+    html += `<h3>Teachers</h3><ul>`;
+    html += van.teachers.length
+      ? van.teachers.map((n) => `<li>${escapeHtml(n)}</li>`).join('')
+      : `<li class="print-empty">None assigned</li>`;
+    html += `</ul>`;
+
+    html += `<h3>Students</h3><ul>`;
+    html += van.students.length
+      ? van.students.map((n) => `<li>${escapeHtml(n)}</li>`).join('')
+      : `<li class="print-empty">None assigned</li>`;
+    html += `</ul></div>`;
+  });
+
+  const unassignedStudents = Object.entries(state.students).filter(
+    ([, d]) => !d.assigned_van
+  );
+  const unassignedTeachers = Object.entries(state.teachers).filter(
+    ([, d]) => !d.assigned_van
+  );
+
+  html += `<div class="print-van"><h2>Not Yet Assigned</h2>`;
+  html += `<h3>Students</h3><ul>`;
+  html += unassignedStudents.length
+    ? unassignedStudents
+        .map(
+          ([n, d]) =>
+            `<li>${escapeHtml(n)}${d.present ? '' : ' <span class="print-absent">(absent)</span>'}</li>`
+        )
+        .join('')
+    : `<li class="print-empty">None</li>`;
+  html += `</ul>`;
+
+  html += `<h3>Teachers</h3><ul>`;
+  html += unassignedTeachers.length
+    ? unassignedTeachers.map(([n]) => `<li>${escapeHtml(n)}</li>`).join('')
+    : `<li class="print-empty">None</li>`;
+  html += `</ul></div>`;
+
+  el.innerHTML = html;
+}
+
+document.getElementById('printBtn').addEventListener('click', () => {
+  buildPrintReport();
+  window.print();
 });
 
 // ── Init ──
