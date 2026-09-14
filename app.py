@@ -8,19 +8,21 @@ app.json.sort_keys = False  # preserve our van ordering — Flask sorts JSON key
 # ──────────────────────────────────────────────────────────────
 # DATABASE SETUP
 # ──────────────────────────────────────────────────────────────
-# SQLite file lives next to app.py while developing locally.
-# On PythonAnywhere this same code works unchanged — it just points
-# at a SQLite file living in the persistent filesystem there instead.
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(basedir, "data.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
+PERIODS = ("AM", "PM")
+
 
 # ──────────────────────────────────────────────────────────────
 # MODELS
 # ──────────────────────────────────────────────────────────────
+# Students and teachers each carry TWO independent van assignments —
+# one for the AM run, one for the PM run — so the same roster and the
+# same fleet of vans can be routed differently morning vs afternoon.
 
 class Van(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -28,80 +30,95 @@ class Van(db.Model):
     capacity = db.Column(db.Integer, nullable=False)
     order_index = db.Column(db.Integer, nullable=False, default=0)
 
-    students = db.relationship("Student", backref="van", lazy=True)
-    teachers = db.relationship("Teacher", backref="van", lazy=True)
-
 
 class Student(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), unique=True, nullable=False)
     present = db.Column(db.Boolean, nullable=False, default=True)
     class_name = db.Column(db.String(40), nullable=False, default="Yellow")
-    van_id = db.Column(db.Integer, db.ForeignKey("van.id"), nullable=True)
+    am_van_id = db.Column(db.Integer, db.ForeignKey("van.id"), nullable=True)
+    pm_van_id = db.Column(db.Integer, db.ForeignKey("van.id"), nullable=True)
 
 
 class Teacher(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), unique=True, nullable=False)
-    van_id = db.Column(db.Integer, db.ForeignKey("van.id"), nullable=True)
+    am_van_id = db.Column(db.Integer, db.ForeignKey("van.id"), nullable=True)
+    pm_van_id = db.Column(db.Integer, db.ForeignKey("van.id"), nullable=True)
+
+
+def _van_field(period):
+    return "am_van_id" if period == "AM" else "pm_van_id"
 
 
 # ──────────────────────────────────────────────────────────────
-# LOGIC — same rules as before, now backed by the database
+# LOGIC
 # ──────────────────────────────────────────────────────────────
 
-def total_occupants(van):
-    return len(van.students) + len(van.teachers)
+def van_students(van, period):
+    field = _van_field(period)
+    return Student.query.filter(getattr(Student, field) == van.id).all()
 
 
-def can_assign_student(van):
-    if total_occupants(van) + 1 > van.capacity:
+def van_teachers(van, period):
+    field = _van_field(period)
+    return Teacher.query.filter(getattr(Teacher, field) == van.id).all()
+
+
+def total_occupants(van, period):
+    return len(van_students(van, period)) + len(van_teachers(van, period))
+
+
+def can_assign_student(van, period):
+    if total_occupants(van, period) + 1 > van.capacity:
         return False, "Adding a student would exceed van capacity."
-    if len(van.teachers) == 0:
+    if len(van_teachers(van, period)) == 0:
         return False, "Each van must have at least one teacher before assigning students."
     return True, ""
 
 
-def can_assign_teacher(van):
-    if total_occupants(van) + 1 > van.capacity:
+def can_assign_teacher(van, period):
+    if total_occupants(van, period) + 1 > van.capacity:
         return False, "Adding a teacher would exceed van capacity."
     return True, ""
 
 
-def assign_student_to_van(student_name, van_name):
+def assign_student_to_van(student_name, van_name, period):
     student = Student.query.filter_by(name=student_name).first()
     if student is None:
         return f"{student_name} is not in the student list."
     if not student.present:
         return f"{student_name} is not present and cannot be assigned."
-    if student.van_id is not None:
-        return f"{student_name} is already assigned to a van."
+    field = _van_field(period)
+    if getattr(student, field) is not None:
+        return f"{student_name} is already assigned to a van for {period}."
     van = Van.query.filter_by(name=van_name).first()
     if van is None:
         return "Van does not exist."
-    can_assign, message = can_assign_student(van)
+    can_assign, message = can_assign_student(van, period)
     if not can_assign:
         return message
-    student.van_id = van.id
+    setattr(student, field, van.id)
     db.session.commit()
-    return f"{student_name} assigned to {van_name}."
+    return f"{student_name} assigned to {van_name} ({period})."
 
 
-def assign_teacher_to_van(teacher_name, van_name):
+def assign_teacher_to_van(teacher_name, van_name, period):
     teacher = Teacher.query.filter_by(name=teacher_name).first()
     if teacher is None:
         return f"{teacher_name} is not in the teacher list."
-    if teacher.van_id is not None:
-        return f"{teacher_name} is already assigned to a van."
+    field = _van_field(period)
+    if getattr(teacher, field) is not None:
+        return f"{teacher_name} is already assigned to a van for {period}."
     van = Van.query.filter_by(name=van_name).first()
     if van is None:
         return "Van does not exist."
-    can_assign, message = can_assign_teacher(van)
+    can_assign, message = can_assign_teacher(van, period)
     if not can_assign:
         return message
-    teacher.van_id = van.id
+    setattr(teacher, field, van.id)
     db.session.commit()
-    return f"{teacher_name} assigned to {van_name}."
+    return f"{teacher_name} assigned to {van_name} ({period})."
 
 
 def add_student(name, present=True):
@@ -121,7 +138,9 @@ def toggle_student_attendance(student_name):
         return f"{student_name} is not in the student list."
     student.present = not student.present
     if not student.present:
-        student.van_id = None  # an absent student can't stay assigned to a van
+        # an absent student can't stay assigned to either run
+        student.am_van_id = None
+        student.pm_van_id = None
     db.session.commit()
     status = "present" if student.present else "absent"
     return f"{student_name} marked {status}."
@@ -156,29 +175,31 @@ def delete_teacher(teacher_name):
     return f"Teacher {teacher_name} deleted."
 
 
-def remove_student_from_van(student_name):
+def remove_student_from_van(student_name, period):
     student = Student.query.filter_by(name=student_name).first()
-    if student is None or student.van_id is None:
-        return f"{student_name} is not assigned to any van."
-    van_name = student.van.name
-    student.van_id = None
+    field = _van_field(period)
+    if student is None or getattr(student, field) is None:
+        return f"{student_name} is not assigned to a van for {period}."
+    van = Van.query.get(getattr(student, field))
+    setattr(student, field, None)
     db.session.commit()
-    return f"{student_name} removed from {van_name}."
+    return f"{student_name} removed from {van.name if van else 'their van'} ({period})."
 
 
-def remove_teacher_from_van(teacher_name):
+def remove_teacher_from_van(teacher_name, period):
     teacher = Teacher.query.filter_by(name=teacher_name).first()
-    if teacher is None or teacher.van_id is None:
-        return f"{teacher_name} is not assigned to any van."
-    van_name = teacher.van.name
-    teacher.van_id = None
+    field = _van_field(period)
+    if teacher is None or getattr(teacher, field) is None:
+        return f"{teacher_name} is not assigned to a van for {period}."
+    van = Van.query.get(getattr(teacher, field))
+    setattr(teacher, field, None)
     db.session.commit()
-    return f"{teacher_name} removed from {van_name}."
+    return f"{teacher_name} removed from {van.name if van else 'their van'} ({period})."
 
 
 def reset_assignments():
-    Student.query.update({Student.van_id: None})
-    Teacher.query.update({Teacher.van_id: None})
+    Student.query.update({Student.am_van_id: None, Student.pm_van_id: None})
+    Teacher.query.update({Teacher.am_van_id: None, Teacher.pm_van_id: None})
     db.session.commit()
 
 
@@ -205,13 +226,28 @@ def delete_van(van_name):
     van = Van.query.filter_by(name=van_name).first()
     if van is None:
         return f"{van_name} does not exist."
-    for student in van.students:
-        student.van_id = None
-    for teacher in van.teachers:
-        teacher.van_id = None
+    affected = 0
+    for student in Student.query.filter(
+        (Student.am_van_id == van.id) | (Student.pm_van_id == van.id)
+    ).all():
+        if student.am_van_id == van.id:
+            student.am_van_id = None
+            affected += 1
+        if student.pm_van_id == van.id:
+            student.pm_van_id = None
+            affected += 1
+    for teacher in Teacher.query.filter(
+        (Teacher.am_van_id == van.id) | (Teacher.pm_van_id == van.id)
+    ).all():
+        if teacher.am_van_id == van.id:
+            teacher.am_van_id = None
+            affected += 1
+        if teacher.pm_van_id == van.id:
+            teacher.pm_van_id = None
+            affected += 1
     db.session.delete(van)
     db.session.commit()
-    return f"Van {van_name} deleted. Anyone assigned to it is now unassigned."
+    return f"Van {van_name} deleted. Anyone assigned to it (AM or PM) is now unassigned."
 
 
 def reorder_vans(ordered_names):
@@ -224,44 +260,65 @@ def reorder_vans(ordered_names):
 
 
 # ──────────────────────────────────────────────────────────────
-# STATE SERIALIZATION — turns the database into JSON for the browser
+# STATE SERIALIZATION — always returns BOTH periods at once, so the
+# frontend can switch between AM/PM instantly without a round trip,
+# and the print export can show both in one document.
 # ──────────────────────────────────────────────────────────────
 
 def get_state():
+    vans = Van.query.order_by(Van.order_index).all()
+    students = Student.query.all()
+    teachers = Teacher.query.all()
+    van_name_by_id = {v.id: v.name for v in vans}
+
+    van_data = {}
+    for v in vans:
+        am_students = [s.name for s in students if s.am_van_id == v.id]
+        pm_students = [s.name for s in students if s.pm_van_id == v.id]
+        am_teachers = [t.name for t in teachers if t.am_van_id == v.id]
+        pm_teachers = [t.name for t in teachers if t.pm_van_id == v.id]
+        van_data[v.name] = {
+            "capacity": v.capacity,
+            "am": {
+                "students": am_students,
+                "teachers": am_teachers,
+                "occupants": len(am_students) + len(am_teachers),
+            },
+            "pm": {
+                "students": pm_students,
+                "teachers": pm_teachers,
+                "occupants": len(pm_students) + len(pm_teachers),
+            },
+        }
+
     return {
         "students": {
             s.name: {
                 "present": s.present,
                 "class": s.class_name,
-                "assigned_van": s.van.name if s.van_id else None,
+                "am_van": van_name_by_id.get(s.am_van_id),
+                "pm_van": van_name_by_id.get(s.pm_van_id),
             }
-            for s in Student.query.all()
+            for s in students
         },
         "teachers": {
-            t.name: {"assigned_van": t.van.name if t.van_id else None}
-            for t in Teacher.query.all()
-        },
-        "vans": {
-            v.name: {
-                "capacity": v.capacity,
-                "students": [s.name for s in v.students],
-                "teachers": [t.name for t in v.teachers],
-                "occupants": total_occupants(v),
+            t.name: {
+                "am_van": van_name_by_id.get(t.am_van_id),
+                "pm_van": van_name_by_id.get(t.pm_van_id),
             }
-            for v in Van.query.order_by(Van.order_index).all()
+            for t in teachers
         },
+        "vans": van_data,
     }
 
 
 # ──────────────────────────────────────────────────────────────
 # SEED DATA — only runs the very first time, when the database is empty.
-# After that, whatever is in the database (including all your edits)
-# is what persists, forever, across restarts and deploys.
 # ──────────────────────────────────────────────────────────────
 
 def seed_if_empty():
     if Van.query.count() > 0:
-        return  # database already has real data — never overwrite it
+        return
 
     db.session.add_all([
         Van(name="Mobility Van", capacity=7, order_index=0),
@@ -284,7 +341,7 @@ def seed_if_empty():
 
 
 with app.app_context():
-    db.create_all()  # creates tables only if they don't already exist
+    db.create_all()
     seed_if_empty()
 
 
@@ -305,28 +362,28 @@ def api_state():
 @app.route("/api/assign_student", methods=["POST"])
 def api_assign_student():
     data = request.get_json()
-    message = assign_student_to_van(data["student"], data["van"])
+    message = assign_student_to_van(data["student"], data["van"], data["period"])
     return jsonify({"message": message, "state": get_state()})
 
 
 @app.route("/api/assign_teacher", methods=["POST"])
 def api_assign_teacher():
     data = request.get_json()
-    message = assign_teacher_to_van(data["teacher"], data["van"])
+    message = assign_teacher_to_van(data["teacher"], data["van"], data["period"])
     return jsonify({"message": message, "state": get_state()})
 
 
 @app.route("/api/remove_student", methods=["POST"])
 def api_remove_student():
     data = request.get_json()
-    message = remove_student_from_van(data["student"])
+    message = remove_student_from_van(data["student"], data["period"])
     return jsonify({"message": message, "state": get_state()})
 
 
 @app.route("/api/remove_teacher", methods=["POST"])
 def api_remove_teacher():
     data = request.get_json()
-    message = remove_teacher_from_van(data["teacher"])
+    message = remove_teacher_from_van(data["teacher"], data["period"])
     return jsonify({"message": message, "state": get_state()})
 
 
@@ -389,7 +446,7 @@ def api_reorder_vans():
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
     reset_assignments()
-    return jsonify({"message": "All assignments cleared.", "state": get_state()})
+    return jsonify({"message": "All AM and PM assignments cleared.", "state": get_state()})
 
 
 if __name__ == "__main__":

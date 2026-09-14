@@ -1,9 +1,14 @@
 const state = { students: {}, teachers: {}, vans: {} };
+let currentPeriod = 'AM';
 let sortables = [];
 let isDragging = false;
 let lastStateJSON = null;
 let pollTimer = null;
 const POLL_INTERVAL_MS = 3000;
+
+function periodKey() {
+  return currentPeriod === 'AM' ? 'am_van' : 'pm_van';
+}
 
 async function api(endpoint, body) {
   const res = await fetch(`/api/${endpoint}`, {
@@ -83,26 +88,41 @@ function makeChip(name, opts) {
   return li;
 }
 
-function seatDots(van) {
+function seatDots(periodData, capacity) {
   const dots = [];
-  for (let i = 0; i < van.teachers.length; i++) dots.push('teacher');
-  for (let i = 0; i < van.students.length; i++) dots.push('student');
-  const empty = Math.max(0, van.capacity - dots.length);
+  for (let i = 0; i < periodData.teachers.length; i++) dots.push('teacher');
+  for (let i = 0; i < periodData.students.length; i++) dots.push('student');
+  const empty = Math.max(0, capacity - dots.length);
   for (let i = 0; i < empty; i++) dots.push('empty');
   return dots;
 }
 
-function render(newState) {
+// applyState() records new data from the server. renderUI() rebuilds the
+// DOM from whatever's currently in `state`, for the currently-selected
+// period. Keeping these separate means switching AM/PM doesn't need a
+// server round trip — both periods are always present in `state` already.
+
+function applyState(newState) {
   Object.assign(state, newState);
   lastStateJSON = JSON.stringify(state);
+}
+
+function render(newState) {
+  applyState(newState);
+  renderUI();
+}
+
+function renderUI() {
   destroySortables();
+
+  const pKey = periodKey();
 
   // ── Roster: students ──
   const studentList = document.getElementById('roster-students-list');
   studentList.innerHTML = '';
   let studentCount = 0;
   Object.entries(state.students).forEach(([name, data]) => {
-    if (data.assigned_van) return;
+    if (data[pKey]) return; // assigned in the period currently being viewed
     studentCount++;
     studentList.appendChild(
       makeChip(name, {
@@ -129,7 +149,7 @@ function render(newState) {
   teacherList.innerHTML = '';
   let teacherCount = 0;
   Object.entries(state.teachers).forEach(([name, data]) => {
-    if (data.assigned_van) return;
+    if (data[pKey]) return;
     teacherCount++;
     teacherList.appendChild(
       makeChip(name, {
@@ -148,6 +168,8 @@ function render(newState) {
   const grid = document.getElementById('vanGrid');
   grid.innerHTML = '';
   Object.entries(state.vans).forEach(([vanName, van], idx) => {
+    const periodData = currentPeriod === 'AM' ? van.am : van.pm;
+
     const card = document.createElement('div');
     card.className = 'van-card';
     card.dataset.van = vanName;
@@ -173,8 +195,8 @@ function render(newState) {
     const occ = document.createElement('span');
     occ.className =
       'van-card__occupancy' +
-      (van.occupants >= van.capacity ? ' van-card__occupancy--full' : '');
-    occ.textContent = `${van.occupants}/${van.capacity}`;
+      (periodData.occupants >= van.capacity ? ' van-card__occupancy--full' : '');
+    occ.textContent = `${periodData.occupants}/${van.capacity}`;
     headerRight.appendChild(occ);
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'van-card__delete';
@@ -182,10 +204,11 @@ function render(newState) {
     deleteBtn.title = 'Delete van';
     deleteBtn.textContent = '\u00d7';
     deleteBtn.addEventListener('click', async () => {
-      const hasOccupants = van.occupants > 0;
-      const confirmMsg = hasOccupants
-        ? `Delete ${vanName}? ${van.occupants} assigned to it will be unassigned.`
-        : `Delete ${vanName}?`;
+      const totalOccupants = van.am.occupants + van.pm.occupants;
+      const confirmMsg =
+        totalOccupants > 0
+          ? `Delete ${vanName}? ${totalOccupants} AM/PM assignment(s) will be cleared.`
+          : `Delete ${vanName}?`;
       if (!confirm(confirmMsg)) return;
       const res = await api('delete_van', { name: vanName });
       showMessage(res.message, looksLikeError(res.message));
@@ -198,7 +221,7 @@ function render(newState) {
 
     const strip = document.createElement('div');
     strip.className = 'seat-strip';
-    seatDots(van).forEach((kind) => {
+    seatDots(periodData, van.capacity).forEach((kind) => {
       const dot = document.createElement('span');
       dot.className = 'seat-dot' + (kind !== 'empty' ? ` seat-dot--${kind}` : '');
       strip.appendChild(dot);
@@ -216,12 +239,12 @@ function render(newState) {
     teacherZone.dataset.context = 'van';
     teacherZone.dataset.van = vanName;
     teacherZone.dataset.type = 'teacher';
-    van.teachers.forEach((name) => {
+    periodData.teachers.forEach((name) => {
       teacherZone.appendChild(
         makeChip(name, {
           delTitle: 'Remove from van',
           onDelete: async () => {
-            const res = await api('remove_teacher', { teacher: name });
+            const res = await api('remove_teacher', { teacher: name, period: currentPeriod });
             showMessage(res.message, looksLikeError(res.message));
             render(res.state);
           },
@@ -241,12 +264,12 @@ function render(newState) {
     studentZone.dataset.context = 'van';
     studentZone.dataset.van = vanName;
     studentZone.dataset.type = 'student';
-    van.students.forEach((name) => {
+    periodData.students.forEach((name) => {
       studentZone.appendChild(
         makeChip(name, {
           delTitle: 'Remove from van',
           onDelete: async () => {
-            const res = await api('remove_student', { student: name });
+            const res = await api('remove_student', { student: name, period: currentPeriod });
             showMessage(res.message, looksLikeError(res.message));
             render(res.state);
           },
@@ -317,16 +340,36 @@ async function handleMove(evt, personType) {
 
   let result;
   if (fromCtx === 'van') {
-    result = await api(`remove_${personType}`, { [personType]: name });
+    result = await api(`remove_${personType}`, { [personType]: name, period: currentPeriod });
   }
   if (toCtx === 'van') {
-    result = await api(`assign_${personType}`, { [personType]: name, van: toVan });
+    result = await api(`assign_${personType}`, {
+      [personType]: name,
+      van: toVan,
+      period: currentPeriod,
+    });
   }
   if (result) {
     showMessage(result.message, looksLikeError(result.message));
     render(result.state);
   }
 }
+
+// ── AM/PM period switch ──
+
+document.querySelectorAll('.period-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.period === currentPeriod) return;
+    currentPeriod = btn.dataset.period;
+    document.querySelectorAll('.period-btn').forEach((b) => {
+      const active = b === btn;
+      b.classList.toggle('period-btn--active', active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.getElementById('periodLabel').textContent = currentPeriod;
+    renderUI();
+  });
+});
 
 // ── Forms & buttons ──
 
@@ -370,7 +413,7 @@ document.getElementById('addVanForm').addEventListener('submit', async (e) => {
 });
 
 document.getElementById('resetBtn').addEventListener('click', async () => {
-  if (!confirm('Clear all van assignments? Students and teachers stay in the roster.')) return;
+  if (!confirm('Clear ALL van assignments for both AM and PM? Students and teachers stay in the roster.')) return;
   const res = await api('reset', {});
   showMessage(res.message, false);
   render(res.state);
@@ -441,6 +484,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ── Print / export ──
+// Builds ONE document containing both AM and PM assignments, regardless
+// of which period is currently being viewed on screen.
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -448,38 +493,32 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function buildPrintReport() {
-  const el = document.getElementById('printReport');
-  const generated = new Date().toLocaleString();
-
-  let html = `<h1>Dispatch — Van Assignments</h1>`;
-  html += `<p class="print-meta">Generated ${generated}</p>`;
+function buildPeriodSection(periodName, periodKeyName) {
+  let html = `<h1 class="print-period-heading">${periodName}</h1>`;
 
   Object.entries(state.vans).forEach(([vanName, van]) => {
+    const periodData = van[periodKeyName];
     html += `<div class="print-van">`;
-    html += `<h2>${escapeHtml(vanName)} <span class="print-occ">(${van.occupants}/${van.capacity})</span></h2>`;
+    html += `<h2>${escapeHtml(vanName)} <span class="print-occ">(${periodData.occupants}/${van.capacity})</span></h2>`;
 
     html += `<h3>Teachers</h3><ul>`;
-    html += van.teachers.length
-      ? van.teachers.map((n) => `<li>${escapeHtml(n)}</li>`).join('')
+    html += periodData.teachers.length
+      ? periodData.teachers.map((n) => `<li>${escapeHtml(n)}</li>`).join('')
       : `<li class="print-empty">None assigned</li>`;
     html += `</ul>`;
 
     html += `<h3>Students</h3><ul>`;
-    html += van.students.length
-      ? van.students.map((n) => `<li>${escapeHtml(n)}</li>`).join('')
+    html += periodData.students.length
+      ? periodData.students.map((n) => `<li>${escapeHtml(n)}</li>`).join('')
       : `<li class="print-empty">None assigned</li>`;
     html += `</ul></div>`;
   });
 
-  const unassignedStudents = Object.entries(state.students).filter(
-    ([, d]) => !d.assigned_van
-  );
-  const unassignedTeachers = Object.entries(state.teachers).filter(
-    ([, d]) => !d.assigned_van
-  );
+  const dataKey = periodKeyName === 'am' ? 'am_van' : 'pm_van';
+  const unassignedStudents = Object.entries(state.students).filter(([, d]) => !d[dataKey]);
+  const unassignedTeachers = Object.entries(state.teachers).filter(([, d]) => !d[dataKey]);
 
-  html += `<div class="print-van"><h2>Not Yet Assigned</h2>`;
+  html += `<div class="print-van"><h2>Not Yet Assigned (${periodName})</h2>`;
   html += `<h3>Students</h3><ul>`;
   html += unassignedStudents.length
     ? unassignedStudents
@@ -496,6 +535,20 @@ function buildPrintReport() {
     ? unassignedTeachers.map(([n]) => `<li>${escapeHtml(n)}</li>`).join('')
     : `<li class="print-empty">None</li>`;
   html += `</ul></div>`;
+
+  return html;
+}
+
+function buildPrintReport() {
+  const el = document.getElementById('printReport');
+  const generated = new Date().toLocaleString();
+
+  let html = `<h1>Dispatch — Van Assignments</h1>`;
+  html += `<p class="print-meta">Generated ${generated}</p>`;
+
+  html += buildPeriodSection('AM', 'am');
+  html += `<div class="print-page-break"></div>`;
+  html += buildPeriodSection('PM', 'pm');
 
   el.innerHTML = html;
 }

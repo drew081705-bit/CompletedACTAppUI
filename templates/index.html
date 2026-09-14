@@ -25,9 +25,17 @@
       <span class="sync-dot"></span>
       <span id="syncLabel">Live</span>
     </span>
-    <button id="resetBtn" class="btn btn--ghost">Clear all assignments</button>
+    <button id="resetBtn" class="btn btn--ghost">Clear all assignments (AM &amp; PM)</button>
   </div>
 </header>
+
+<div class="period-bar">
+  <div class="period-switch" role="tablist" aria-label="AM or PM run">
+    <button type="button" class="period-btn period-btn--active" data-period="AM" role="tab" aria-selected="true">AM</button>
+    <button type="button" class="period-btn" data-period="PM" role="tab" aria-selected="false">PM</button>
+  </div>
+  <p class="period-bar__hint">Editing the <strong id="periodLabel">AM</strong> run — AM and PM assignments are independent.</p>
+</div>
 
 <div id="banner" class="banner" hidden></div>
 
