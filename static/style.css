@@ -225,17 +225,39 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 620px 1fr;
   gap: 22px;
   padding: 22px 28px 40px;
   align-items: start;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1080px) {
   .layout { grid-template-columns: 1fr; }
 }
 
-/* ── Panels (roster) ── */
+/* ── Panels (roster) ──
+   Students and teachers sit side by side, not stacked, so a long student
+   list never pushes the teacher panel out of view underneath it. */
+
+.roster {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.roster__panel {
+  flex: 1 1 0;
+  min-width: 240px;
+}
+
+@media (max-width: 640px) {
+  .roster {
+    flex-direction: column;
+  }
+  .roster__panel {
+    width: 100%;
+  }
+}
 
 .panel {
   background: var(--card);
@@ -275,6 +297,26 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Roster lists scroll internally past a certain length, instead of
+   stretching the panel (and the whole page) taller and taller. */
+.chip-list--scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.chip-list--scroll::-webkit-scrollbar {
+  width: 7px;
+}
+.chip-list--scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chip-list--scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
 }
 
 .chip {
@@ -506,12 +548,26 @@ body {
   margin: 0;
   padding: 0;
   min-height: 40px;
+  max-height: 220px;
+  overflow-y: auto;
   border: 1.5px dashed var(--border);
   border-radius: 8px;
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.van-card__dropzone::-webkit-scrollbar {
+  width: 7px;
+}
+.van-card__dropzone::-webkit-scrollbar-track {
+  background: transparent;
+}
+.van-card__dropzone::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
 }
 .van-card__dropzone:empty::before {
   content: "Drop here";
@@ -519,6 +575,38 @@ body {
   color: #B9B4AA;
   padding: 6px 4px;
   display: block;
+}
+
+/* ── Van destination ── */
+
+.van-card__destination {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.van-card__destination-icon {
+  color: var(--ink-soft);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.van-card__destination input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.van-card__destination input::placeholder {
+  color: #ACA79C;
+}
+.van-card__destination input:focus {
+  outline: none;
+  border-color: var(--gold);
+  background: #fff;
 }
 
 /* ── Footer ── */
@@ -591,6 +679,13 @@ body {
   font-weight: 400;
   font-size: 11.5px;
   color: #555;
+}
+
+.print-report .print-destination {
+  font-size: 12.5px;
+  color: #444;
+  margin: -2px 0 8px;
+  font-style: italic;
 }
 
 .print-report h3 {

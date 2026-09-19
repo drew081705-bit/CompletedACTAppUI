@@ -43,12 +43,12 @@
 
   <!-- ROSTER -->
   <section class="roster">
-    <div class="panel">
+    <div class="panel roster__panel">
       <div class="panel__header">
         <h2>Students</h2>
         <span class="panel__count" id="studentCount">0</span>
       </div>
-      <ul id="roster-students-list" class="chip-list" data-context="roster" data-type="student"></ul>
+      <ul id="roster-students-list" class="chip-list chip-list--scroll" data-context="roster" data-type="student"></ul>
       <form id="addStudentForm" class="inline-form">
         <input type="text" id="studentNameInput" placeholder="Add student name" autocomplete="off">
         <label class="check">
@@ -58,12 +58,12 @@
       </form>
     </div>
 
-    <div class="panel">
+    <div class="panel roster__panel">
       <div class="panel__header">
         <h2>Teachers</h2>
         <span class="panel__count" id="teacherCount">0</span>
       </div>
-      <ul id="roster-teachers-list" class="chip-list" data-context="roster" data-type="teacher"></ul>
+      <ul id="roster-teachers-list" class="chip-list chip-list--scroll" data-context="roster" data-type="teacher"></ul>
       <form id="addTeacherForm" class="inline-form">
         <input type="text" id="teacherNameInput" placeholder="Add teacher name" autocomplete="off">
         <button type="submit" class="btn btn--small">Add</button>

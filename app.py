@@ -29,6 +29,7 @@ class Van(db.Model):
     name = db.Column(db.String(80), unique=True, nullable=False)
     capacity = db.Column(db.Integer, nullable=False)
     order_index = db.Column(db.Integer, nullable=False, default=0)
+    destination = db.Column(db.String(200), nullable=False, default="")
 
 
 class Student(db.Model):
@@ -259,6 +260,15 @@ def reorder_vans(ordered_names):
     db.session.commit()
 
 
+def set_van_destination(van_name, destination):
+    van = Van.query.filter_by(name=van_name).first()
+    if van is None:
+        return f"{van_name} does not exist."
+    van.destination = (destination or "").strip()
+    db.session.commit()
+    return f"Destination for {van_name} updated."
+
+
 # ──────────────────────────────────────────────────────────────
 # STATE SERIALIZATION — always returns BOTH periods at once, so the
 # frontend can switch between AM/PM instantly without a round trip,
@@ -279,6 +289,7 @@ def get_state():
         pm_teachers = [t.name for t in teachers if t.pm_van_id == v.id]
         van_data[v.name] = {
             "capacity": v.capacity,
+            "destination": v.destination or "",
             "am": {
                 "students": am_students,
                 "teachers": am_teachers,
@@ -441,6 +452,13 @@ def api_reorder_vans():
     data = request.get_json()
     reorder_vans(data["order"])
     return jsonify({"message": "Van order updated.", "state": get_state()})
+
+
+@app.route("/api/set_van_destination", methods=["POST"])
+def api_set_van_destination():
+    data = request.get_json()
+    message = set_van_destination(data["name"], data.get("destination", ""))
+    return jsonify({"message": message, "state": get_state()})
 
 
 @app.route("/api/reset", methods=["POST"])

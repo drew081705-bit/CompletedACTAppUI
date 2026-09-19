@@ -2,6 +2,7 @@ const state = { students: {}, teachers: {}, vans: {} };
 let currentPeriod = 'AM';
 let sortables = [];
 let isDragging = false;
+let isEditingDestination = false;
 let lastStateJSON = null;
 let pollTimer = null;
 const POLL_INTERVAL_MS = 3000;
@@ -218,6 +219,38 @@ function renderUI() {
     header.appendChild(headerRight);
 
     card.appendChild(header);
+
+    const destinationRow = document.createElement('div');
+    destinationRow.className = 'van-card__destination';
+    const destIcon = document.createElement('span');
+    destIcon.className = 'van-card__destination-icon';
+    destIcon.textContent = '⌖';
+    destIcon.title = 'Destination';
+    destinationRow.appendChild(destIcon);
+    const destInput = document.createElement('input');
+    destInput.type = 'text';
+    destInput.placeholder = 'Destination (e.g. Riverside Elementary)';
+    destInput.value = van.destination || '';
+    destInput.autocomplete = 'off';
+    destInput.addEventListener('focus', () => {
+      isEditingDestination = true;
+    });
+    destInput.addEventListener('blur', async () => {
+      isEditingDestination = false;
+      const newValue = destInput.value.trim();
+      if (newValue === (van.destination || '')) return; // unchanged, skip the round trip
+      const res = await api('set_van_destination', { name: vanName, destination: newValue });
+      showMessage(res.message, looksLikeError(res.message));
+      render(res.state);
+    });
+    destInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        destInput.blur();
+      }
+    });
+    destinationRow.appendChild(destInput);
+    card.appendChild(destinationRow);
 
     const strip = document.createElement('div');
     strip.className = 'seat-strip';
@@ -443,7 +476,7 @@ function setSyncStatus(status) {
 }
 
 async function pollState() {
-  if (isDragging) return; // don't yank a list out from under an active drag
+  if (isDragging || isEditingDestination) return; // don't disrupt an active drag or edit
 
   try {
     const newState = await fetchState();
@@ -500,6 +533,9 @@ function buildPeriodSection(periodName, periodKeyName) {
     const periodData = van[periodKeyName];
     html += `<div class="print-van">`;
     html += `<h2>${escapeHtml(vanName)} <span class="print-occ">(${periodData.occupants}/${van.capacity})</span></h2>`;
+    if (van.destination) {
+      html += `<p class="print-destination">Destination: ${escapeHtml(van.destination)}</p>`;
+    }
 
     html += `<h3>Teachers</h3><ul>`;
     html += periodData.teachers.length
